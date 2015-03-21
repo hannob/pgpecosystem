@@ -1,0 +1,76 @@
+#!/usr/bin/python
+
+helptext = """
+Breaks DSA keys when two signatures with a duplicate k / r value are found.
+
+Usage:
+	breakdsa [filename]
+
+The script expects a 12-column input file (tab separated) with the following values:
+col  1: Key ID of affected DSA key (only used for output info)
+col  2: r value (same for both signatures)
+col  3: s value of first signature
+col  4: s value of second signature
+col  5: hash value of first signature
+col  6: hash value of second signature
+col  7: p value of DSA key
+col  8: q value of DSA key
+col  9: g value of DSA key
+col 10: y value of DSA key
+
+All values are expected hex encoded.
+
+The MySQL query to get the data pre-formatted to feed into this script is:
+
+SELECT a.keyid, a.dsa_r, a.dsa_s, b.dsa_s, a.hash, b.hash, c.dsa_p, c.dsa_q, c.dsa_g, c.dsa_y FROM sigs_dsa a JOIN sigs_dsa b JOIN keys_dsa c ON a.dsa_r = b.dsa_r AND a.dsa_s <> b.dsa_s AND a.keyid = c.keyid GROUP BY a.dsa_r INTO OUTFILE '/tmp/dsa-duplicate-r.txt';
+"""
+
+import gmpy2, sys
+
+def breakdsa(keyid, r, s1, s2, h1, h2, p, q, g, y):
+  try:
+    down = gmpy2.invert((s1-s2), q)
+    up = gmpy2.t_mod(h1-h2, q)
+
+    mul = gmpy2.mul(down, up)
+    k = gmpy2.t_mod(mul, q)
+
+    r_inv = gmpy2.invert(r, q)
+
+    x1 = gmpy2.t_mod((s1*k-h1)*r_inv, q)
+    x2 = gmpy2.t_mod((s2*k-h2)*r_inv, q)
+    if x1 < 0: x1 += q
+    if x2 < 0: x2 += q
+
+    y1 = gmpy2.powmod(g, x1, p)
+    y2 = gmpy2.powmod(g, x2, p)
+
+    # when both back-calculated y-values match and both x-values identical we likely broke a key
+    if (y1 == y2) and (y1 == y):
+      print("We found a breakable key")
+      print("y: %s"% hex(y))
+      print("k: %s" % hex(k))
+      print("r: %s" % hex(r))
+      print("keyid: %s" % hex(keyid))
+      if x1 == x2:
+        print("x: %s (private key)"% hex(x1))
+      else:
+        print("y match, but no x match")
+        print("x1: %s (private key)"% hex(x1))
+        print("x2: %s (private key)"% hex(x2))
+      print("")
+
+  except ZeroDivisionError:
+    pass
+
+if len(sys.argv) != 2:
+  print(helptext)
+  sys.exit(1)
+
+with open(sys.argv[1]) as fp:
+  for line in fp:
+    x = line.split()
+    if (len(x) == 10) and (x[4] != "none") and (x[5] != "none"):
+      for i in range(10):
+        x[i] = gmpy2.mpz(x[i], 16)
+      breakdsa(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9])

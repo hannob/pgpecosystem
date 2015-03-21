@@ -1,0 +1,57 @@
+#!/usr/bin/python
+
+helptext = """
+Brute forces DSA keys for occurences of small k values.
+
+Usage:
+	brutedsa [filename]
+
+The script expects a 12-column input file (tab separated) with the following values:
+col  1: Key ID of affected DSA key (only used for output info)
+col  2: r value of signature
+col  3: s value of signature
+col  4: hash of signature
+col  5: p value of key
+col  6: q value of key
+col  7: g value of key
+col  8: y value of key
+
+All values are expected hex encoded.
+
+The MySQL query to get the data pre-formatted to feed into this script is:
+
+SELECT A.id,A.keyid,A.dsa_r,A.dsa_s,hash,dsa_p,dsa_q,dsa_g,dsa_y FROM sigs_dsa A LEFT JOIN keys_dsa B ON A.keyid = B.keyid INTO OUTFILE '/tmp/dsa-sigs-with-keys.txt';
+"""
+
+import gmpy2, sys
+
+try_k = list(range(0, 100))
+
+def brutedsa(sigid, keyid, r, s, h, p, q, g, y):
+
+  r_inv = gmpy2.invert(r, q)
+
+  for k in try_k:
+    x = gmpy2.t_mod((s*k-h)*r_inv, q)
+    if x < 0: x += q
+    y1 = gmpy2.powmod(g, x, p)
+    if y1 == y:
+      print("")
+      print("found suspicious sig %s" % sigid)
+      print("k: %s" % k)
+      print("x: %s" % x)
+
+if len(sys.argv) != 2:
+  print(helptext)
+  sys.exit(1)
+
+with open(sys.argv[1]) as fp:
+  i = 0
+  for line in fp:
+    i += 1
+    if (i % 1000) == 0: sys.stdout.write('.')
+    x = line.split("\t")
+    try:
+      brutedsa(x[0], x[1], gmpy2.mpz(x[2], 16), gmpy2.mpz(x[3], 16), gmpy2.mpz(x[4], 16), gmpy2.mpz(x[5], 16), gmpy2.mpz(x[6], 16), gmpy2.mpz(x[7], 16), gmpy2.mpz(x[8], 16))
+    except ValueError:
+      pass
