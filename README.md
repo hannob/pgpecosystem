@@ -1,6 +1,12 @@
 Scripts to analyze the PGP key server data
 ==========================================
 
+background
+----------
+
+ * [A look at the PGP ecosystem through the key server data (background paper)](http://eprint.iacr.org/2015/262)
+ * [Slides from talk at BSidesHN](http://int21.de/slides/slides-pgp.pdf)
+
 keyr
 ----
 
