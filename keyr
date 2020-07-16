@@ -5,424 +5,416 @@
 # keyserver dumps
 # https://bitbucket.org/skskeyserver/sks-keyserver/wiki/KeydumpSources
 
-import argparse, struct, binascii, hashlib, sys, gmpy2
-
+import argparse
+import struct
+import binascii
+import hashlib
+import sys
+import gmpy2
 
 
 def DEBUG(s):
-  #print(s)
-  pass
+    # print(s)
+    pass
 
 
 smallprimes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409, 419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523, 541, 547, 557, 563, 569, 571, 577, 587, 593, 599, 601, 607, 613, 617, 619, 631, 641, 643, 647, 653, 659, 661, 673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743, 751, 757, 761, 769, 773, 787, 797, 809, 811, 821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 937, 941, 947, 953, 967, 971, 977, 983, 991, 997, 1009, 1013, 1019, 1021]
 primeprod = 1
 for prime in smallprimes:
-  primeprod *= prime
+    primeprod *= prime
 DEBUG("Small prime product %i" % primeprod)
 
 
-pkalg_table = {\
-  1: "RSA(ES)",
-  2: "RSA(E)",
-  3: "RSA(S)",
-  16: "ElG(E)",
-  17: "DSA",
-  18: "ECC",
-  19: "ECDSA",
-  20: "ElG(ES)",
-  21: "DH"}
+pkalg_table = {1: "RSA(ES)",
+               2: "RSA(E)",
+               3: "RSA(S)",
+               16: "ElG(E)",
+               17: "DSA",
+               18: "ECC",
+               19: "ECDSA",
+               20: "ElG(ES)",
+               21: "DH"}
 
-hashalg_table = {\
-  1: "MD5",
-  2: "SHA1",
-  3: "RIPEMD160",
-  8: "SHA256",
-  9: "SHA384",
-  10: "SHA512",
-  11: "SHA224"}
+hashalg_table = {1: "MD5",
+                 2: "SHA1",
+                 3: "RIPEMD160",
+                 8: "SHA256",
+                 9: "SHA384",
+                 10: "SHA512",
+                 11: "SHA224"}
 
-curve_table = {\
-  b'\x2a\x86\x48\xce\x3d\x03\x01\x07'     : 'nistp256',
-  b'\x2b\x81\x04\x00\x22'                 : 'nistp384',
-  b'\x2b\x81\x04\x00\x23'                 : 'nistp521',
-  b'\x2b\x81\x04\x00\x0a'                 : 'nistk256',
-  b'\x2b\x24\x03\x03\x02\x08\x01\x01\x07' : 'brainpoolp256',
-  b'\x2b\x24\x03\x03\x02\x08\x01\x01\x0b' : 'brainpoolp384',
-  b'\x2b\x24\x03\x03\x02\x08\x01\x01\x0d' : 'brainpoolp512',
-  b'\x2b\x06\x01\x04\x01\xda\x47\x0f\x00' : 'curve25519'}
+curve_table = {b'\x2a\x86\x48\xce\x3d\x03\x01\x07': 'nistp256',
+               b'\x2b\x81\x04\x00\x22': 'nistp384',
+               b'\x2b\x81\x04\x00\x23': 'nistp521',
+               b'\x2b\x81\x04\x00\x0a': 'nistk256',
+               b'\x2b\x24\x03\x03\x02\x08\x01\x01\x07': 'brainpoolp256',
+               b'\x2b\x24\x03\x03\x02\x08\x01\x01\x0b': 'brainpoolp384',
+               b'\x2b\x24\x03\x03\x02\x08\x01\x01\x0d': 'brainpoolp512',
+               b'\x2b\x06\x01\x04\x01\xda\x47\x0f\x00': 'curve25519'}
 
 
 def sigtype(i):
-  if i == 0x00: return "bindoc"
-  elif i == 0x01: return "text"
-  elif i == 0x02: return "standalone"
-  elif i == 0x10: return "gencert"
-  elif i == 0x11: return "perscert"
-  elif i == 0x12: return "casualcert"
-  elif i == 0x13: return "positivecert"
-  elif i == 0x18: return "subkey_binding"
-  elif i == 0x19: return "primkey_binding"
-  elif i == 0x1f: return "direct_key"
-  elif i == 0x20: return "revocation"
-  elif i == 0x28: return "subkey_revocation"
-  elif i == 0x30: return "cert_revocation"
-  elif i == 0x40: return "timestamp"
-  elif i == 0x50: return "thirdparty_confirmation"
-  else: return "Unk %x" % i
+    if i == 0x00: return "bindoc"
+    elif i == 0x01: return "text"
+    elif i == 0x02: return "standalone"
+    elif i == 0x10: return "gencert"
+    elif i == 0x11: return "perscert"
+    elif i == 0x12: return "casualcert"
+    elif i == 0x13: return "positivecert"
+    elif i == 0x18: return "subkey_binding"
+    elif i == 0x19: return "primkey_binding"
+    elif i == 0x1f: return "direct_key"
+    elif i == 0x20: return "revocation"
+    elif i == 0x28: return "subkey_revocation"
+    elif i == 0x30: return "cert_revocation"
+    elif i == 0x40: return "timestamp"
+    elif i == 0x50: return "thirdparty_confirmation"
+    else: return "Unk %x" % i
 
 
 def mpi_read(f):
-  len = int((struct.unpack(">H", f.read(2))[0]+7)) >> 3
-  return binascii.hexlify(f.read(len)).decode('ascii')
+    len = int((struct.unpack(">H", f.read(2))[0] + 7)) >> 3
+    return binascii.hexlify(f.read(len)).decode('ascii')
 
 
 def pgp_parse(filename, mode, PRIMECHECK):
-  f = open(filename, 'rb')
+    f = open(filename, 'rb')
 
-  packet_next = 0
+    packet_next = 0
 
-  last_subkey_size = 0
-  last_subkey_realstart = 0
+    last_subkey_size = 0
+    last_subkey_realstart = 0
 
-  dsa_p_prime = True
-  dsa_q_prime = True
-  rsa_smallfact = False
+    dsa_p_prime = True
+    dsa_q_prime = True
+    rsa_smallfact = False
 
-  while 1:
-    f.seek(packet_next)
-    packet_start = packet_next
+    while 1:
+        f.seek(packet_next)
+        packet_start = packet_next
 
-    packet_sig = f.read(1)
-    if len(packet_sig) == 0: break # end of file
-    packet_sig = struct.unpack("B", packet_sig)[0]
+        packet_sig = f.read(1)
+        if len(packet_sig) == 0:
+            break  # end of file
+        packet_sig = struct.unpack("B", packet_sig)[0]
 
-    if (packet_sig & (1<<7)) != 0:
-      DEBUG("")
-      DEBUG("*packet*")
-    else:
-      print("wrong packet at offset %i" % packet_start)
-      break
-
-    if (packet_sig & (1<<6)) != 0:        # Bit 6
-      packet_format = "new"
-      packet_tag = packet_sig & 0x3f      # Bit 5-0
-
-      packet_size = struct.unpack("B", f.read(1))[0]
-      if packet_size == 255:
-        packet_size = struct.unpack(">L", f.read(4))[0]
-      elif packet_size >= 192:
-        packet_size = ((packet_size-192)<< 8) + 192 + struct.unpack("B", f.read(1))[0]
-    else:
-      packet_format = "old"
-      packet_tag = (packet_sig>>2) & 0xf    # Bit 5-2
-      packet_lengthtype = packet_sig & 0x3    # Bit 0-1
-      if packet_lengthtype == 0: packet_size = struct.unpack("B", f.read(1))[0]
-      elif packet_lengthtype == 1: packet_size = struct.unpack(">H", f.read(2))[0]
-      elif packet_lengthtype == 2: packet_size = struct.unpack(">L", f.read(4))[0]
-      else:
-        DEBUG("Strange packet lengthtype %i" % packet_lengthtype) # this should go to stderr
-        break
-
-
-    packet_realstart = f.tell()
-    packet_next = packet_realstart+packet_size
-    DEBUG("packet_realstart %i" % packet_realstart)
-
-
-    DEBUG("sig %x format %s tag %i size 0x%x %i" % (packet_sig, packet_format, packet_tag, packet_size, packet_size))
-
-    if packet_tag == 6:    # Public Key
-      key_start = last_pubkey_start = packet_start
-      key_realstart = last_pubkey_realstart = packet_realstart
-      key_size = last_pubkey_size = packet_size
-      DEBUG("found pubkey start %i realstart %i size %i" % (last_pubkey_start, last_pubkey_realstart, last_pubkey_size))
-      key_sub = 0
-
-    if packet_tag == 14:    # Public Key
-      key_start = last_subkey_start = packet_start
-      key_realstart = last_subkey_realstart = packet_realstart
-      key_size = last_subkey_size = packet_size
-      DEBUG("found subkey start %i realstart %i size %i" % (last_subkey_start, last_subkey_realstart, last_subkey_size))
-      key_sub = 1
-
-    if packet_tag in [6, 14]: # key
-      key_ver = struct.unpack("B", f.read(1))[0]
-      if key_ver in [2, 3]:
-        DEBUG("v23 key found")
-        key_time = struct.unpack(">L", f.read(4))[0]
-        f.seek(f.tell()+2)
-        key_pkalg = struct.unpack("B", f.read(1))[0]
-        key_pkalgd = pkalg_table.get(key_pkalg, "Unk %i" % key_pkalg)
-      elif key_ver == 4:
-        DEBUG("v4 key found")
-        key_time = struct.unpack(">L", f.read(4))[0]
-        key_pkalg = struct.unpack("B", f.read(1))[0]
-        key_pkalgd = pkalg_table.get(key_pkalg, "Unk %i" % key_pkalg)
-      else:
-        DEBUG("unknown key ver")
-        key_pkalg = 0
-        key_pkalgd = ""
-      DEBUG("pkalg %i %s" % (key_pkalg, key_pkalgd))
-
-      if key_pkalgd == "DSA":
-        dsa_p = mpi_read(f)
-        dsa_bits = len(dsa_p)*4
-        dsa_q = mpi_read(f)
-        if PRIMECHECK:
-          dsa_p_prime = gmpy2.is_prime(gmpy2.mpz(dsa_p, 16))
-          dsa_q_prime = gmpy2.is_prime(gmpy2.mpz(dsa_q, 16))
-        dsa_g = mpi_read(f)
-        dsa_y = mpi_read(f)
-        key_alg = "DSA"
-        DEBUG("dsa_p %s" % dsa_p)
-        DEBUG("dsa_q %s" % dsa_q)
-        DEBUG("dsa_g %s" % dsa_g)
-        DEBUG("dsa_y %s" % dsa_y)
-      elif key_pkalgd[0:3] == "ElG":
-        dsa_p = mpi_read(f)
-        dsa_bits = len(dsa_p)*4
-        if PRIMECHECK:
-          dsa_p_prime = gmpy2.is_prime(gmpy2.mpz(dsa_p, 16))
-          dsa_q_prime = True
-        dsa_g = mpi_read(f)
-        dsa_y = mpi_read(f)
-        dsa_q = ""
-        key_alg = "ElGamal"
-      elif key_pkalgd[0:3] == "RSA":
-        rsa_n = mpi_read(f)
-        rsa_bits = len(rsa_n)*4
-        rsa_e = mpi_read(f)
-        a, b = gmpy2.f_divmod(gmpy2.mpz(rsa_n, 16), primeprod)
-        if b == 0:
-          DEBUG("RSA with small factor")
-          rsa_smallfact = True
+        if (packet_sig & (1 << 7)) != 0:
+            DEBUG("")
+            DEBUG("*packet*")
         else:
-          rsa_smallfact = False
-        DEBUG("rsa_n %s" % rsa_n)
-        DEBUG("rsa_e %s" % rsa_e)
-        DEBUG("rsa_bits %s" % rsa_bits)
-      elif (key_pkalgd == "ECDSA") or (key_pkalgd == "ECC"):
-        key_alg = key_pkalgd
-        curvelen = struct.unpack("B", f.read(1))[0]
-        curveraw = f.read(curvelen)
-        curve_type = curve_table.get(curveraw, 'unknown')
-        DEBUG("curve %s" % curve_type)
-        curve_point = mpi_read(f)
-      else:
-        sys.stderr.write("Unknown PK algorithm %s at %i\n" % (key_pkalgd, packet_start))
+            print("wrong packet at offset %i" % packet_start)
+            break
 
-      key_id = ""
-      if key_pkalgd[0:3] == "RSA" and key_ver in [2, 3]:
-        key_id = rsa_n[-16:]
-      if key_ver == 4:
-        keyhash = hashlib.sha1()
-        keyhash.update(b'\x99')
-        keyhash.update(struct.pack(">H", key_size))
-        f.seek(key_realstart)
-        keyhash.update(f.read(key_size))
-        key_id = keyhash.hexdigest()[-16:]
+        if (packet_sig & (1 << 6)) != 0:        # Bit 6
+            packet_format = "new"
+            packet_tag = packet_sig & 0x3f      # Bit 5-0
 
-      if key_sub == 0: last_pubkey_id = key_id
-      key_id_short = key_id[-8:]
-      DEBUG("keyid %s %s"% (key_id_short, key_id))
-
-      if mode == 'sql':
-        if key_pkalgd == "DSA" or key_pkalgd[0:3] == "ElG":
-
-          if (not dsa_p_prime) and (not dsa_q_prime):
-            dsa_err = "('p_notprime,q_notprime')"
-          elif not dsa_q_prime:
-            dsa_err = "('q_notprime')"
-          elif not dsa_p_prime:
-            dsa_err = "('p_notprime')"
-          else:
-            dsa_err = "('')"
-
-
-          print("INSERT INTO keys_dsa (keyid, keyid_short, keyid_master, alg, dsa_p, dsa_q, dsa_g, dsa_y, dsa_bits, ver, sub, errors, file, keyoffset, masteroffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i, %s, '%s', %i, %i);" % (key_id, key_id_short, last_pubkey_id, key_alg, dsa_p, dsa_q, dsa_g, dsa_y, dsa_bits, key_ver, key_sub, dsa_err, filename, key_start, last_pubkey_start))
-        elif key_pkalgd[0:3] == "RSA":
-          rsa_err = ""
-          if rsa_smallfact: rsa_err = "smallfact"
-
-          print("INSERT INTO keys_rsa (keyid, keyid_short, keyid_master, rsa_n, rsa_e, rsa_bits, ver, sub, errors, file, keyoffset, masteroffset) VALUES ('%s', '%s', '%s', '%s', '%s','%s', %i, %i, '%s', '%s', %i, %i);" % (key_id, key_id_short, last_pubkey_id, rsa_n, rsa_e, rsa_bits, key_ver, key_sub, rsa_err, filename, key_start, last_pubkey_start))
-        elif key_pkalgd == "ECC" or key_pkalgd == "ECDSA":
-
-          print("INSERT INTO keys_ecc (keyid, keyid_short, keyid_master, alg, curve_type, curve_point, ver, sub, file, keyoffset, masteroffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %i, %i, '%s', %i, %i);" % (key_id, key_id_short, last_pubkey_id, key_alg, curve_type, curve_point, key_ver, key_sub, filename, key_start, last_pubkey_start))
-
-      elif mode == 'check':
-        if key_pkalgd == "DSA":
-          if not dsa_p_prime: print("WARNING! DSA p of key %s (subkey of %s) not prime" % (key_id, last_pubkey_id))
-          if not dsa_q_prime: print("WARNING! DSA q of key %s (subkey of %s) not prime" % (key_id, last_pubkey_id))
-        elif key_pkalgd == "Elg":
-          if not dsa_p_prime: print("WARNING! ElGamal  p of key %s (subkey of %s) not prime" % (key_id, last_pubkey_id))
-
-
-
-    if packet_tag == 13:    # UID
-      last_uid_start = packet_start
-      last_uid_realstart = packet_realstart
-      last_uid_size = packet_size
-      DEBUG("found uid start %i realstart %i size %i" % (last_uid_start, last_uid_realstart, last_uid_size))
-
-    if packet_tag == 2:    # Signature Packet
-
-      DEBUG("signature found")
-      sig_version = struct.unpack("B", f.read(1))[0]
-
-      if (sig_version != 0x03) and (sig_version != 0x04) and (sig_version != 0x02):
-        sys.stderr.write("ERROR: Sig not v3 or v4 %i\n" % sig_version)
-        continue
-
-      sig_pkalg = 0
-      sig_pkalgd = ""
-      sig_hash_str = ""
-
-
-      if sig_version == 0x03:
-        DEBUG("sig v3 found")
-        if struct.unpack("B", f.read(1))[0] != 5:
-          DEBUG("invalid v3 length field")
-        sig_type = struct.unpack("B", f.read(1))[0]
-        DEBUG("sig: %x %s" % (sig_type, sigtype(sig_type)))
-
-        sig_issuer_time = f.read(4)
-        sig_issuer_keyid = binascii.hexlify(f.read(8)).decode('ascii')
-        sig_pkalg = struct.unpack("B", f.read(1))[0]
-        sig_hashalg = struct.unpack("B", f.read(1))[0]
-        sig_pkalgd = pkalg_table.get(sig_pkalg, "Unk %i" % sig_pkalg)
-        sig_hashalgd = hashalg_table.get(sig_hashalg, "Unk %i" % sig_hashalg)
-        DEBUG("pkalg %s 0x%x hashalg %s 0x%x" % (sig_pkalgd, sig_pkalg, sig_hashalgd, sig_hashalg))
-        sig_hash_upper_16bits = binascii.hexlify(f.read(2)).decode('ascii')
-        DEBUG("hash left bits %s" % sig_hash_upper_16bits)
-        if sig_pkalgd == "DSA":
-          sig_r_length = int((struct.unpack(">H", f.read(2))[0]+7) / 8)
-          sig_r = binascii.hexlify(f.read(sig_r_length)).decode('ascii')
-          sig_s_length = int((struct.unpack(">H", f.read(2))[0]+7) / 8)
-          sig_s = binascii.hexlify(f.read(sig_r_length)).decode('ascii')
-          DEBUG("r: %s" % sig_r)
-          DEBUG("s: %s" % sig_s)
-        elif sig_pkalgd[0:3] == "RSA":
-          sig_rsa_length = int((struct.unpack(">H", f.read(2))[0]+7) / 8)
-          sig_rsa = binascii.hexlify(f.read(sig_rsa_length)).decode('ascii')
-
-
-
-      if sig_version == 0x04:
-        DEBUG("signature v4 found")
-        sig_type = struct.unpack("B", f.read(1))[0]
-        DEBUG("sig: %x %s" % (sig_type, sigtype(sig_type)))
-
-        sig_pkalg = struct.unpack("B", f.read(1))[0]
-
-        sig_hashalg = struct.unpack("B", f.read(1))[0]
-
-        sig_pkalgd = pkalg_table.get(sig_pkalg, "Unk %i" % sig_pkalg)
-
-        sig_hashalgd = hashalg_table.get(sig_hashalg, "Unk %i" % sig_hashalg)
-
-        DEBUG("pkalg %s 0x%x hashalg %s 0x%x" % (sig_pkalgd, sig_pkalg, sig_hashalgd, sig_hashalg))
-
-
-        sig_count_hashed_subpackets = struct.unpack(">H", f.read(2))[0]
-        sig_offset_hashed_subpackets = f.tell()
-        DEBUG("hashed subpackets %i" % sig_count_hashed_subpackets)
-        f.seek(f.tell()+sig_count_hashed_subpackets)
-        sig_end_hashed_subpackets = f.tell()
-        DEBUG("packet_realstart %i sig_end_hashed_subpackets %i" % (packet_realstart, sig_end_hashed_subpackets))
-
-        sig_count_unhashed_subpackets = struct.unpack(">H", f.read(2))[0]
-        sig_offset_unhashed_subpackets = f.tell()
-        DEBUG("unhashed subpackets %i" % sig_count_unhashed_subpackets)
-
-        sig_issuer_keyid = ""
-        while f.tell() < (sig_offset_unhashed_subpackets+sig_count_unhashed_subpackets):
-          subpacket_len = struct.unpack("B", f.read(1))[0]
-          if subpacket_len == 255:
-            subpacket_len = struct.unpack(">L", f.read(4))[0]
-          elif subpacket_len >= 192:
-            subpacket_len = ((subpacket_len-192)<< 8) + 192 + struct.unpack("B", f.read(1))[0]
-          DEBUG("subpacket_len %i" % subpacket_len)
-          subpacket_type = struct.unpack("B", f.read(1))[0]
-          if subpacket_type == 16: # issuer keyid
-            sig_issuer_keyid = binascii.hexlify(f.read(subpacket_len-1)).decode('ascii')
-            if len(sig_issuer_keyid) > 16:
-              sig_issuer_keyid = sig_issuer_keyid[0:14] + ".."
-            DEBUG("issuer keyid %s" % sig_issuer_keyid)
-
-        f.seek(sig_offset_unhashed_subpackets+sig_count_unhashed_subpackets)
-
-        sig_hash_upper_16bits = binascii.hexlify(f.read(2)).decode('ascii')
-        DEBUG("hash upper 16 bits %s" % sig_hash_upper_16bits)
-        sig_data_offset = f.tell()
-
-
-        if sig_type in [0x10, 0x11, 0x12, 0x13] and (sig_hashalgd[0:3] != "Unk"):
-          sig_hash = hashlib.new(sig_hashalgd)
-          sig_hash.update(b'\x99')
-          sig_hash.update(struct.pack(">H", last_pubkey_size))
-          f.seek(last_pubkey_realstart)
-          sig_hash.update(f.read(last_pubkey_size))
-          sig_hash.update(b'\xb4')
-          sig_hash.update(struct.pack(">L", last_uid_size))
-          f.seek(last_uid_realstart)
-          sig_hash.update(f.read(last_uid_size))
-
-          f.seek(packet_realstart)
-          sig_hash.update(f.read(sig_end_hashed_subpackets-packet_realstart))
-
-          sig_hash.update(b'\x04\xff')
-          sig_hash.update(struct.pack(">L", sig_end_hashed_subpackets-packet_realstart))
-          sig_hash_str = sig_hash.hexdigest()
-
-        elif sig_type in [0x18] and (sig_hashalgd[0:3] != "Unk"):
-          sig_hash = hashlib.new(sig_hashalgd)
-          sig_hash.update(b'\x99')
-          sig_hash.update(struct.pack(">H", last_pubkey_size))
-          f.seek(last_pubkey_realstart)
-          sig_hash.update(f.read(last_pubkey_size))
-          sig_hash.update(b'\x99')
-          sig_hash.update(struct.pack(">H", last_subkey_size))
-          f.seek(last_subkey_realstart)
-          sig_hash.update(f.read(last_subkey_size))
-
-          f.seek(packet_realstart)
-          sig_hash.update(f.read(sig_end_hashed_subpackets-packet_realstart))
-
-          sig_hash.update(b'\x04\xff')
-          sig_hash.update(struct.pack(">L", sig_end_hashed_subpackets-packet_realstart))
-          sig_hash_str = sig_hash.hexdigest()
-
+            packet_size = struct.unpack("B", f.read(1))[0]
+            if packet_size == 255:
+                packet_size = struct.unpack(">L", f.read(4))[0]
+            elif packet_size >= 192:
+                packet_size = ((packet_size - 192) << 8) + 192 + struct.unpack("B", f.read(1))[0]
         else:
-          sig_hash_str = "none"
+            packet_format = "old"
+            packet_tag = (packet_sig >> 2) & 0xf    # Bit 5-2
+            packet_lengthtype = packet_sig & 0x3    # Bit 0-1
+            if packet_lengthtype == 0: packet_size = struct.unpack("B", f.read(1))[0]
+            elif packet_lengthtype == 1: packet_size = struct.unpack(">H", f.read(2))[0]
+            elif packet_lengthtype == 2: packet_size = struct.unpack(">L", f.read(4))[0]
+            else:
+                DEBUG("Strange packet lengthtype %i" % packet_lengthtype)  # this should go to stderr
+                break
 
-        DEBUG("hash: %s" % sig_hash_str)
-        if sig_hash_upper_16bits == sig_hash_str[0:4]:
-          DEBUG("good hash")
-          hash_good = "1"
-        else:
-          DEBUG("bad hash")
-          hash_good = "0"
+        packet_realstart = f.tell()
+        packet_next = packet_realstart + packet_size
+        DEBUG("packet_realstart %i" % packet_realstart)
 
-        if sig_pkalgd == "DSA" or sig_pkalgd == "ECDSA":
-          f.seek(sig_data_offset)
-          sig_r = mpi_read(f)
-          sig_s = mpi_read(f)
-          DEBUG("r: %s" % sig_r)
-          DEBUG("s: %s" % sig_s)
-        elif sig_pkalgd[0:3] == "RSA":
-          f.seek(sig_data_offset)
-          sig_rsa = mpi_read(f)
-        else:
-          sig_r = ""
-          sig_s = ""
+        DEBUG("sig %x format %s tag %i size 0x%x %i" % (packet_sig, packet_format, packet_tag, packet_size, packet_size))
 
+        if packet_tag == 6:    # Public Key
+            key_start = last_pubkey_start = packet_start
+            key_realstart = last_pubkey_realstart = packet_realstart
+            key_size = last_pubkey_size = packet_size
+            DEBUG("found pubkey start %i realstart %i size %i" % (last_pubkey_start, last_pubkey_realstart, last_pubkey_size))
+            key_sub = 0
 
-      if (sig_pkalgd == "DSA") and (sig_version in [3, 4]) and (mode == 'sql'):
-        print("INSERT INTO sigs_dsa (dsa_r, dsa_s, sigtype, hashbits, hash, pkalg, hashalg, keyid, master_keyid, file, keyoffset, sigoffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i);" % (sig_r, sig_s, sigtype(sig_type), sig_hash_upper_16bits, sig_hash_str, sig_pkalgd, sig_hashalgd, sig_issuer_keyid, last_pubkey_id, filename, last_pubkey_start, packet_start))
-      if (sig_pkalgd == "ECDSA") and (sig_version in [3, 4]) and (mode == 'sql'):
-        print("INSERT INTO sigs_ecc (dsa_r, dsa_s, sigtype, hashbits, hash, pkalg, hashalg, keyid, master_keyid, file, keyoffset, sigoffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i);" % (sig_r, sig_s, sigtype(sig_type), sig_hash_upper_16bits, sig_hash_str, sig_pkalgd, sig_hashalgd, sig_issuer_keyid, last_pubkey_id, filename, last_pubkey_start, packet_start))
-      elif (sig_pkalgd[0:3] == "RSA") and (sig_version in [3, 4]) and (mode == 'sql'):
-        print("INSERT INTO sigs_rsa (rsa_sig, sigtype, hashbits, hash, pkalg, hashalg, keyid, master_keyid, file, keyoffset, sigoffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i);" % (sig_rsa, sigtype(sig_type), sig_hash_upper_16bits, sig_hash_str, sig_pkalgd, sig_hashalgd, sig_issuer_keyid, last_pubkey_id, filename, last_pubkey_start, packet_start))
+        if packet_tag == 14:    # Public Key
+            key_start = last_subkey_start = packet_start
+            key_realstart = last_subkey_realstart = packet_realstart
+            key_size = last_subkey_size = packet_size
+            DEBUG("found subkey start %i realstart %i size %i" % (last_subkey_start, last_subkey_realstart, last_subkey_size))
+            key_sub = 1
+
+        if packet_tag in [6, 14]:  # key
+            key_ver = struct.unpack("B", f.read(1))[0]
+            if key_ver in [2, 3]:
+                DEBUG("v23 key found")
+                key_time = struct.unpack(">L", f.read(4))[0]
+                f.seek(f.tell() + 2)
+                key_pkalg = struct.unpack("B", f.read(1))[0]
+                key_pkalgd = pkalg_table.get(key_pkalg, "Unk %i" % key_pkalg)
+            elif key_ver == 4:
+                DEBUG("v4 key found")
+                key_time = struct.unpack(">L", f.read(4))[0]
+                key_pkalg = struct.unpack("B", f.read(1))[0]
+                key_pkalgd = pkalg_table.get(key_pkalg, "Unk %i" % key_pkalg)
+            else:
+                DEBUG("unknown key ver")
+                key_pkalg = 0
+                key_pkalgd = ""
+            DEBUG("pkalg %i %s" % (key_pkalg, key_pkalgd))
+
+            if key_pkalgd == "DSA":
+                dsa_p = mpi_read(f)
+                dsa_bits = len(dsa_p) * 4
+                dsa_q = mpi_read(f)
+                if PRIMECHECK:
+                    dsa_p_prime = gmpy2.is_prime(gmpy2.mpz(dsa_p, 16))
+                    dsa_q_prime = gmpy2.is_prime(gmpy2.mpz(dsa_q, 16))
+                dsa_g = mpi_read(f)
+                dsa_y = mpi_read(f)
+                key_alg = "DSA"
+                DEBUG("dsa_p %s" % dsa_p)
+                DEBUG("dsa_q %s" % dsa_q)
+                DEBUG("dsa_g %s" % dsa_g)
+                DEBUG("dsa_y %s" % dsa_y)
+            elif key_pkalgd[0:3] == "ElG":
+                dsa_p = mpi_read(f)
+                dsa_bits = len(dsa_p) * 4
+                if PRIMECHECK:
+                    dsa_p_prime = gmpy2.is_prime(gmpy2.mpz(dsa_p, 16))
+                    dsa_q_prime = True
+                dsa_g = mpi_read(f)
+                dsa_y = mpi_read(f)
+                dsa_q = ""
+                key_alg = "ElGamal"
+            elif key_pkalgd[0:3] == "RSA":
+                rsa_n = mpi_read(f)
+                rsa_bits = len(rsa_n) * 4
+                rsa_e = mpi_read(f)
+                a, b = gmpy2.f_divmod(gmpy2.mpz(rsa_n, 16), primeprod)
+                if b == 0:
+                    DEBUG("RSA with small factor")
+                    rsa_smallfact = True
+                else:
+                    rsa_smallfact = False
+                DEBUG("rsa_n %s" % rsa_n)
+                DEBUG("rsa_e %s" % rsa_e)
+                DEBUG("rsa_bits %s" % rsa_bits)
+            elif (key_pkalgd == "ECDSA") or (key_pkalgd == "ECC"):
+                key_alg = key_pkalgd
+                curvelen = struct.unpack("B", f.read(1))[0]
+                curveraw = f.read(curvelen)
+                curve_type = curve_table.get(curveraw, 'unknown')
+                DEBUG("curve %s" % curve_type)
+                curve_point = mpi_read(f)
+            else:
+                sys.stderr.write("Unknown PK algorithm %s at %i\n" % (key_pkalgd, packet_start))
+
+            key_id = ""
+            if key_pkalgd[0:3] == "RSA" and key_ver in [2, 3]:
+                key_id = rsa_n[-16:]
+            if key_ver == 4:
+                keyhash = hashlib.sha1()
+                keyhash.update(b'\x99')
+                keyhash.update(struct.pack(">H", key_size))
+                f.seek(key_realstart)
+                keyhash.update(f.read(key_size))
+                key_id = keyhash.hexdigest()[-16:]
+
+            if key_sub == 0: last_pubkey_id = key_id
+            key_id_short = key_id[-8:]
+            DEBUG("keyid %s %s" % (key_id_short, key_id))
+
+            if mode == 'sql':
+                if key_pkalgd == "DSA" or key_pkalgd[0:3] == "ElG":
+
+                    if (not dsa_p_prime) and (not dsa_q_prime):
+                        dsa_err = "('p_notprime,q_notprime')"
+                    elif not dsa_q_prime:
+                        dsa_err = "('q_notprime')"
+                    elif not dsa_p_prime:
+                        dsa_err = "('p_notprime')"
+                    else:
+                        dsa_err = "('')"
+
+                    print("INSERT INTO keys_dsa (keyid, keyid_short, keyid_master, alg, dsa_p, dsa_q, dsa_g, dsa_y, dsa_bits, ver, sub, errors, file, keyoffset, masteroffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i, %s, '%s', %i, %i);" % (key_id, key_id_short, last_pubkey_id, key_alg, dsa_p, dsa_q, dsa_g, dsa_y, dsa_bits, key_ver, key_sub, dsa_err, filename, key_start, last_pubkey_start))
+                elif key_pkalgd[0:3] == "RSA":
+                    rsa_err = ""
+                    if rsa_smallfact: rsa_err = "smallfact"
+
+                    print("INSERT INTO keys_rsa (keyid, keyid_short, keyid_master, rsa_n, rsa_e, rsa_bits, ver, sub, errors, file, keyoffset, masteroffset) VALUES ('%s', '%s', '%s', '%s', '%s','%s', %i, %i, '%s', '%s', %i, %i);" % (key_id, key_id_short, last_pubkey_id, rsa_n, rsa_e, rsa_bits, key_ver, key_sub, rsa_err, filename, key_start, last_pubkey_start))
+                elif key_pkalgd == "ECC" or key_pkalgd == "ECDSA":
+
+                    print("INSERT INTO keys_ecc (keyid, keyid_short, keyid_master, alg, curve_type, curve_point, ver, sub, file, keyoffset, masteroffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %i, %i, '%s', %i, %i);" % (key_id, key_id_short, last_pubkey_id, key_alg, curve_type, curve_point, key_ver, key_sub, filename, key_start, last_pubkey_start))
+
+            elif mode == 'check':
+                if key_pkalgd == "DSA":
+                    if not dsa_p_prime: print("WARNING! DSA p of key %s (subkey of %s) not prime" % (key_id, last_pubkey_id))
+                    if not dsa_q_prime: print("WARNING! DSA q of key %s (subkey of %s) not prime" % (key_id, last_pubkey_id))
+                elif key_pkalgd == "Elg":
+                    if not dsa_p_prime: print("WARNING! ElGamal  p of key %s (subkey of %s) not prime" % (key_id, last_pubkey_id))
+
+        if packet_tag == 13:    # UID
+            last_uid_start = packet_start
+            last_uid_realstart = packet_realstart
+            last_uid_size = packet_size
+            DEBUG("found uid start %i realstart %i size %i" % (last_uid_start, last_uid_realstart, last_uid_size))
+
+        if packet_tag == 2:    # Signature Packet
+
+            DEBUG("signature found")
+            sig_version = struct.unpack("B", f.read(1))[0]
+
+            if (sig_version != 0x03) and (sig_version != 0x04) and (sig_version != 0x02):
+                sys.stderr.write("ERROR: Sig not v3 or v4 %i\n" % sig_version)
+                continue
+
+            sig_pkalg = 0
+            sig_pkalgd = ""
+            sig_hash_str = ""
+
+            if sig_version == 0x03:
+                DEBUG("sig v3 found")
+                if struct.unpack("B", f.read(1))[0] != 5:
+                    DEBUG("invalid v3 length field")
+                sig_type = struct.unpack("B", f.read(1))[0]
+                DEBUG("sig: %x %s" % (sig_type, sigtype(sig_type)))
+
+                sig_issuer_time = f.read(4)
+                sig_issuer_keyid = binascii.hexlify(f.read(8)).decode('ascii')
+                sig_pkalg = struct.unpack("B", f.read(1))[0]
+                sig_hashalg = struct.unpack("B", f.read(1))[0]
+                sig_pkalgd = pkalg_table.get(sig_pkalg, "Unk %i" % sig_pkalg)
+                sig_hashalgd = hashalg_table.get(sig_hashalg, "Unk %i" % sig_hashalg)
+                DEBUG("pkalg %s 0x%x hashalg %s 0x%x" % (sig_pkalgd, sig_pkalg, sig_hashalgd, sig_hashalg))
+                sig_hash_upper_16bits = binascii.hexlify(f.read(2)).decode('ascii')
+                DEBUG("hash left bits %s" % sig_hash_upper_16bits)
+                if sig_pkalgd == "DSA":
+                    sig_r_length = int((struct.unpack(">H", f.read(2))[0] + 7) / 8)
+                    sig_r = binascii.hexlify(f.read(sig_r_length)).decode('ascii')
+                    sig_s_length = int((struct.unpack(">H", f.read(2))[0] + 7) / 8)
+                    sig_s = binascii.hexlify(f.read(sig_r_length)).decode('ascii')
+                    DEBUG("r: %s" % sig_r)
+                    DEBUG("s: %s" % sig_s)
+                elif sig_pkalgd[0:3] == "RSA":
+                    sig_rsa_length = int((struct.unpack(">H", f.read(2))[0] + 7) / 8)
+                    sig_rsa = binascii.hexlify(f.read(sig_rsa_length)).decode('ascii')
+
+            if sig_version == 0x04:
+                DEBUG("signature v4 found")
+                sig_type = struct.unpack("B", f.read(1))[0]
+                DEBUG("sig: %x %s" % (sig_type, sigtype(sig_type)))
+
+                sig_pkalg = struct.unpack("B", f.read(1))[0]
+
+                sig_hashalg = struct.unpack("B", f.read(1))[0]
+
+                sig_pkalgd = pkalg_table.get(sig_pkalg, "Unk %i" % sig_pkalg)
+
+                sig_hashalgd = hashalg_table.get(sig_hashalg, "Unk %i" % sig_hashalg)
+
+                DEBUG("pkalg %s 0x%x hashalg %s 0x%x" % (sig_pkalgd, sig_pkalg, sig_hashalgd, sig_hashalg))
+
+                sig_count_hashed_subpackets = struct.unpack(">H", f.read(2))[0]
+                sig_offset_hashed_subpackets = f.tell()
+                DEBUG("hashed subpackets %i" % sig_count_hashed_subpackets)
+                f.seek(f.tell() + sig_count_hashed_subpackets)
+                sig_end_hashed_subpackets = f.tell()
+                DEBUG("packet_realstart %i sig_end_hashed_subpackets %i" % (packet_realstart, sig_end_hashed_subpackets))
+
+                sig_count_unhashed_subpackets = struct.unpack(">H", f.read(2))[0]
+                sig_offset_unhashed_subpackets = f.tell()
+                DEBUG("unhashed subpackets %i" % sig_count_unhashed_subpackets)
+
+                sig_issuer_keyid = ""
+                while f.tell() < (sig_offset_unhashed_subpackets + sig_count_unhashed_subpackets):
+                    subpacket_len = struct.unpack("B", f.read(1))[0]
+                    if subpacket_len == 255:
+                        subpacket_len = struct.unpack(">L", f.read(4))[0]
+                    elif subpacket_len >= 192:
+                        subpacket_len = ((subpacket_len - 192) << 8) + 192 + struct.unpack("B", f.read(1))[0]
+                    DEBUG("subpacket_len %i" % subpacket_len)
+                    subpacket_type = struct.unpack("B", f.read(1))[0]
+                    if subpacket_type == 16:  # issuer keyid
+                        sig_issuer_keyid = binascii.hexlify(f.read(subpacket_len - 1)).decode('ascii')
+                        if len(sig_issuer_keyid) > 16:
+                            sig_issuer_keyid = sig_issuer_keyid[0:14] + ".."
+                        DEBUG("issuer keyid %s" % sig_issuer_keyid)
+
+                f.seek(sig_offset_unhashed_subpackets + sig_count_unhashed_subpackets)
+
+                sig_hash_upper_16bits = binascii.hexlify(f.read(2)).decode('ascii')
+                DEBUG("hash upper 16 bits %s" % sig_hash_upper_16bits)
+                sig_data_offset = f.tell()
+
+                if sig_type in [0x10, 0x11, 0x12, 0x13] and (sig_hashalgd[0:3] != "Unk"):
+                    sig_hash = hashlib.new(sig_hashalgd)
+                    sig_hash.update(b'\x99')
+                    sig_hash.update(struct.pack(">H", last_pubkey_size))
+                    f.seek(last_pubkey_realstart)
+                    sig_hash.update(f.read(last_pubkey_size))
+                    sig_hash.update(b'\xb4')
+                    sig_hash.update(struct.pack(">L", last_uid_size))
+                    f.seek(last_uid_realstart)
+                    sig_hash.update(f.read(last_uid_size))
+
+                    f.seek(packet_realstart)
+                    sig_hash.update(f.read(sig_end_hashed_subpackets - packet_realstart))
+
+                    sig_hash.update(b'\x04\xff')
+                    sig_hash.update(struct.pack(">L", sig_end_hashed_subpackets - packet_realstart))
+                    sig_hash_str = sig_hash.hexdigest()
+
+                elif sig_type in [0x18] and (sig_hashalgd[0:3] != "Unk"):
+                    sig_hash = hashlib.new(sig_hashalgd)
+                    sig_hash.update(b'\x99')
+                    sig_hash.update(struct.pack(">H", last_pubkey_size))
+                    f.seek(last_pubkey_realstart)
+                    sig_hash.update(f.read(last_pubkey_size))
+                    sig_hash.update(b'\x99')
+                    sig_hash.update(struct.pack(">H", last_subkey_size))
+                    f.seek(last_subkey_realstart)
+                    sig_hash.update(f.read(last_subkey_size))
+
+                    f.seek(packet_realstart)
+                    sig_hash.update(f.read(sig_end_hashed_subpackets - packet_realstart))
+
+                    sig_hash.update(b'\x04\xff')
+                    sig_hash.update(struct.pack(">L", sig_end_hashed_subpackets - packet_realstart))
+                    sig_hash_str = sig_hash.hexdigest()
+
+                else:
+                    sig_hash_str = "none"
+
+                DEBUG("hash: %s" % sig_hash_str)
+                if sig_hash_upper_16bits == sig_hash_str[0:4]:
+                    DEBUG("good hash")
+                    hash_good = "1"
+                else:
+                    DEBUG("bad hash")
+                    hash_good = "0"
+
+                if sig_pkalgd == "DSA" or sig_pkalgd == "ECDSA":
+                    f.seek(sig_data_offset)
+                    sig_r = mpi_read(f)
+                    sig_s = mpi_read(f)
+                    DEBUG("r: %s" % sig_r)
+                    DEBUG("s: %s" % sig_s)
+                elif sig_pkalgd[0:3] == "RSA":
+                    f.seek(sig_data_offset)
+                    sig_rsa = mpi_read(f)
+                else:
+                    sig_r = ""
+                    sig_s = ""
+
+            if (sig_pkalgd == "DSA") and (sig_version in [3, 4]) and (mode == 'sql'):
+                print("INSERT INTO sigs_dsa (dsa_r, dsa_s, sigtype, hashbits, hash, pkalg, hashalg, keyid, master_keyid, file, keyoffset, sigoffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i);" % (sig_r, sig_s, sigtype(sig_type), sig_hash_upper_16bits, sig_hash_str, sig_pkalgd, sig_hashalgd, sig_issuer_keyid, last_pubkey_id, filename, last_pubkey_start, packet_start))
+            if (sig_pkalgd == "ECDSA") and (sig_version in [3, 4]) and (mode == 'sql'):
+                print("INSERT INTO sigs_ecc (dsa_r, dsa_s, sigtype, hashbits, hash, pkalg, hashalg, keyid, master_keyid, file, keyoffset, sigoffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i);" % (sig_r, sig_s, sigtype(sig_type), sig_hash_upper_16bits, sig_hash_str, sig_pkalgd, sig_hashalgd, sig_issuer_keyid, last_pubkey_id, filename, last_pubkey_start, packet_start))
+            elif (sig_pkalgd[0:3] == "RSA") and (sig_version in [3, 4]) and (mode == 'sql'):
+                print("INSERT INTO sigs_rsa (rsa_sig, sigtype, hashbits, hash, pkalg, hashalg, keyid, master_keyid, file, keyoffset, sigoffset) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %i, %i);" % (sig_rsa, sigtype(sig_type), sig_hash_upper_16bits, sig_hash_str, sig_pkalgd, sig_hashalgd, sig_issuer_keyid, last_pubkey_id, filename, last_pubkey_start, packet_start))
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('files', metavar='keydump', type=str, nargs='+',
@@ -438,4 +430,4 @@ if options.check: parse_mode = "check"
 else: parse_mode = "sql"
 
 for filename in options.files:
-  pgp_parse(filename, parse_mode, options.primetest)
+    pgp_parse(filename, parse_mode, options.primetest)
