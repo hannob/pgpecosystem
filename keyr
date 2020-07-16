@@ -345,6 +345,8 @@ def pgp_parse(filename, mode, PRIMECHECK):
           subpacket_type = struct.unpack("B", f.read(1))[0]
           if subpacket_type == 16: # issuer keyid
             sig_issuer_keyid = binascii.hexlify(f.read(subpacket_len-1)).decode('ascii')
+            if len(sig_issuer_keyid) > 16:
+              sig_issuer_keyid = sig_issuer_keyid[0:14] + ".."
             DEBUG("issuer keyid %s" % sig_issuer_keyid)
 
         f.seek(sig_offset_unhashed_subpackets+sig_count_unhashed_subpackets)
