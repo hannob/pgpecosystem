@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 # PGP packet format RFC 4880
 # https://tools.ietf.org/html/rfc4880

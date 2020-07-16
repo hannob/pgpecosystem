@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 helptext = """
 Brute forces DSA keys for occurences of small k values.

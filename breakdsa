@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 helptext = """
 Breaks DSA keys when two signatures with a duplicate k / r value are found.
